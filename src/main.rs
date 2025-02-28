@@ -29,19 +29,34 @@ async fn main() -> Result<()> {
 
     // List all buckets
     println!("\n1. Listing all buckets:");
-    list_buckets(&client).await?;
+    match list_buckets(&client).await {
+        Ok(_) => println!("   Buckets listed successfully"),
+        Err(e) => {
+            println!("   Error listing buckets: {:?}", e);
+            return Err(anyhow::anyhow!("Failed to list buckets: {:?}", e));
+        }
+    }
 
     // Create a new bucket
     println!("\n2. Creating a new bucket: {}", bucket_name);
-    if let Err(e) = create_bucket(&client, bucket_name).await {
-        println!("   Error creating bucket: {}", e);
-        // Continue with the demo even if bucket creation fails
-        // (might already exist from a previous run)
+    match create_bucket(&client, bucket_name).await {
+        Ok(_) => println!("   Bucket created successfully"),
+        Err(e) => {
+            println!("   Error creating bucket: {:?}", e);
+            // Continue with the demo even if bucket creation fails
+            // (might already exist from a previous run)
+        }
     }
 
     // Upload an object to the bucket
     println!("\n3. Uploading file to bucket:");
-    upload_object(&client, bucket_name, object_key, local_file).await?;
+    match upload_object(&client, bucket_name, object_key, local_file).await {
+        Ok(_) => println!("   File uploaded successfully"),
+        Err(e) => {
+            println!("   Error uploading file: {:?}", e);
+            return Err(anyhow::anyhow!("Failed to upload file: {:?}", e));
+        }
+    }
 
     // List objects in the bucket
     println!("\n4. Listing objects in bucket:");
@@ -86,7 +101,16 @@ async fn list_buckets(client: &Client) -> Result<(), Error> {
 
 // Create a new S3 bucket
 async fn create_bucket(client: &Client, bucket_name: &str) -> Result<(), Error> {
-    let result = client.create_bucket().bucket(bucket_name).send().await;
+    let result = client
+        .create_bucket()
+        .bucket(bucket_name)
+        .create_bucket_configuration(
+            aws_sdk_s3::types::CreateBucketConfiguration::builder()
+                .location_constraint(aws_sdk_s3::types::BucketLocationConstraint::ApNortheast1)
+                .build(),
+        )
+        .send()
+        .await;
     match result {
         Ok(_) => {
             println!("   Bucket '{}' created successfully", bucket_name);
