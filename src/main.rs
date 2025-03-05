@@ -1,13 +1,11 @@
 use anyhow::{Context, Result};
-use aws_sdk_cloudfront::{Client as CloudFrontClient, Region};
+use aws_sdk_cloudfront::Client as CloudFrontClient;
 use aws_sdk_s3::{
     primitives::ByteStream,
-    types::{ObjectCannedAcl, ObjectIdentifier},
     Client as S3Client,
 };
 use mime_guess::from_path;
 use std::path::Path;
-use std::time::Duration;
 
 // S3バケット名とCloudFrontディストリビューションIDを設定
 const BUCKET_NAME: &str = "my-rust-uploads";
@@ -70,21 +68,23 @@ async fn invalidate_cloudfront_cache(client: &CloudFrontClient, paths: &[&str]) 
     // パスの前に「/」を付ける
     let paths_with_slash: Vec<String> = paths.iter().map(|p| format!("/{}", p)).collect();
 
+    // パスの設定を作成
+    let paths = aws_sdk_cloudfront::types::Paths::builder()
+        .quantity(paths_with_slash.len() as i32)
+        .set_items(Some(paths_with_slash))
+        .build();
+
+    // 無効化バッチを作成
+    let invalidation_batch = aws_sdk_cloudfront::types::InvalidationBatch::builder()
+        .caller_reference(format!("invalidation-{}", chrono::Utc::now().timestamp()))
+        .paths(paths)
+        .build();
+
     // 無効化リクエストを作成
     let resp = client
         .create_invalidation()
         .distribution_id(CLOUDFRONT_DISTRIBUTION_ID)
-        .invalidation_batch(
-            aws_sdk_cloudfront::types::InvalidationBatch::builder()
-                .caller_reference(format!("invalidation-{}", chrono::Utc::now().timestamp()))
-                .paths(
-                    aws_sdk_cloudfront::types::Paths::builder()
-                        .quantity(paths_with_slash.len() as i32)
-                        .items(paths_with_slash)
-                        .build(),
-                )
-                .build(),
-        )
+        .invalidation_batch(invalidation_batch)
         .send()
         .await
         .context("CloudFrontキャッシュの無効化に失敗しました")?;
