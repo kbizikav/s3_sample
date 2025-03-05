@@ -1,227 +1,94 @@
-use anyhow::Result;
-use aws_config::meta::region::RegionProviderChain;
-use aws_sdk_s3::{primitives::ByteStream, Client, Error};
+use anyhow::{Context, Result};
+use aws_sdk_cloudfront::{Client as CloudFrontClient, Region};
+use aws_sdk_s3::{
+    primitives::ByteStream,
+    types::{ObjectCannedAcl, ObjectIdentifier},
+    Client as S3Client,
+};
+use mime_guess::from_path;
 use std::path::Path;
+use std::time::Duration;
+
+// S3バケット名とCloudFrontディストリビューションIDを設定
+const BUCKET_NAME: &str = "my-rust-uploads";
+const CLOUDFRONT_DISTRIBUTION_ID: &str = "E3DBRIHOOQCFIE";
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
+    // AWS SDK設定を読み込み
+    let config = aws_config::load_from_env().await;
 
-    // Set up AWS region and credentials
-    let region_provider = RegionProviderChain::default_provider().or_else("ap-northeast-1");
-    let config = aws_config::from_env().region(region_provider).load().await;
-    let client = Client::new(&config);
+    // S3クライアントとCloudFrontクライアントを作成
+    let s3_client = S3Client::new(&config);
+    let cloudfront_client = CloudFrontClient::new(&config);
 
-    println!("=== AWS S3 Sample Application ===");
+    // アップロードするファイルのパス
+    let file_path = "example.txt";
+    let file_key = Path::new(file_path).file_name().unwrap().to_str().unwrap();
 
-    // Define bucket and object names for our examples
-    let bucket_name = "my-test-bucket-rust-sample";
-    let object_key = "sample-object.txt";
-    let local_file = "sample-upload.txt";
-    let download_file = "sample-download.txt";
+    // ファイルをS3にアップロード
+    upload_file_to_s3(&s3_client, file_path, file_key).await?;
 
-    // Create a sample file for upload
-    std::fs::write(
-        local_file,
-        "This is a sample file content for S3 upload test.",
-    )
-    .expect("Failed to create sample file");
+    // CloudFrontキャッシュを無効化（必要な場合）
+    invalidate_cloudfront_cache(&cloudfront_client, &[file_key]).await?;
 
-    // List all buckets
-    println!("\n1. Listing all buckets:");
-    match list_buckets(&client).await {
-        Ok(_) => println!("   Buckets listed successfully"),
-        Err(e) => {
-            println!("   Error listing buckets: {:?}", e);
-            return Err(anyhow::anyhow!("Failed to list buckets: {:?}", e));
-        }
-    }
-
-    // Create a new bucket
-    println!("\n2. Creating a new bucket: {}", bucket_name);
-    match create_bucket(&client, bucket_name).await {
-        Ok(_) => println!("   Bucket created successfully"),
-        Err(e) => {
-            println!("   Error creating bucket: {:?}", e);
-            // Continue with the demo even if bucket creation fails
-            // (might already exist from a previous run)
-        }
-    }
-
-    // Upload an object to the bucket
-    println!("\n3. Uploading file to bucket:");
-    match upload_object(&client, bucket_name, object_key, local_file).await {
-        Ok(_) => println!("   File uploaded successfully"),
-        Err(e) => {
-            println!("   Error uploading file: {:?}", e);
-            return Err(anyhow::anyhow!("Failed to upload file: {:?}", e));
-        }
-    }
-
-    // List objects in the bucket
-    println!("\n4. Listing objects in bucket:");
-    list_objects(&client, bucket_name).await?;
-
-    // Download the object
-    println!("\n5. Downloading object from bucket:");
-    download_object(&client, bucket_name, object_key, download_file).await?;
-    println!("   Downloaded to: {}", download_file);
-
-    // Delete the object
-    println!("\n6. Deleting object from bucket:");
-    delete_object(&client, bucket_name, object_key).await?;
-
-    // Delete the bucket
-    println!("\n7. Deleting bucket:");
-    delete_bucket(&client, bucket_name).await?;
-
-    // Clean up local files
-    let _ = std::fs::remove_file(local_file);
-    let _ = std::fs::remove_file(download_file);
-
-    println!("\nAll operations completed successfully!");
-    Ok(())
-}
-
-// List all S3 buckets
-async fn list_buckets(client: &Client) -> Result<(), Error> {
-    let resp = client.list_buckets().send().await?;
-
-    if let Some(buckets) = resp.buckets() {
-        println!("   Found {} buckets:", buckets.len());
-        for bucket in buckets {
-            println!("   - {}", bucket.name().unwrap_or_default());
-        }
-    } else {
-        println!("   No buckets found");
-    }
+    // CloudFrontのURLを表示
+    let cloudfront_domain = "your-distribution-domain.cloudfront.net";
+    println!("ファイルは以下のURLからアクセスできます:");
+    println!("https://{}/{}", cloudfront_domain, file_key);
 
     Ok(())
 }
 
-// Create a new S3 bucket
-async fn create_bucket(client: &Client, bucket_name: &str) -> Result<(), Error> {
-    let result = client
-        .create_bucket()
-        .bucket(bucket_name)
-        .create_bucket_configuration(
-            aws_sdk_s3::types::CreateBucketConfiguration::builder()
-                .location_constraint(aws_sdk_s3::types::BucketLocationConstraint::ApNortheast1)
+// S3にファイルをアップロードする関数
+async fn upload_file_to_s3(client: &S3Client, file_path: &str, key: &str) -> Result<()> {
+    // ファイルを読み込む
+    let body = ByteStream::from_path(Path::new(file_path))
+        .await
+        .context("ファイルの読み込みに失敗しました")?;
+
+    // Content-Typeを推測
+    let content_type = from_path(file_path).first_or_octet_stream().to_string();
+
+    // S3にアップロード
+    let resp = client
+        .put_object()
+        .bucket(BUCKET_NAME)
+        .key(key)
+        .body(body)
+        .content_type(content_type)
+        .send()
+        .await
+        .context("S3へのアップロードに失敗しました")?;
+
+    println!("ファイルを正常にアップロードしました: {:?}", resp);
+    Ok(())
+}
+
+// CloudFrontのキャッシュを無効化する関数
+async fn invalidate_cloudfront_cache(client: &CloudFrontClient, paths: &[&str]) -> Result<()> {
+    // パスの前に「/」を付ける
+    let paths_with_slash: Vec<String> = paths.iter().map(|p| format!("/{}", p)).collect();
+
+    // 無効化リクエストを作成
+    let resp = client
+        .create_invalidation()
+        .distribution_id(CLOUDFRONT_DISTRIBUTION_ID)
+        .invalidation_batch(
+            aws_sdk_cloudfront::types::InvalidationBatch::builder()
+                .caller_reference(format!("invalidation-{}", chrono::Utc::now().timestamp()))
+                .paths(
+                    aws_sdk_cloudfront::types::Paths::builder()
+                        .quantity(paths_with_slash.len() as i32)
+                        .items(paths_with_slash)
+                        .build(),
+                )
                 .build(),
         )
         .send()
-        .await;
-    match result {
-        Ok(_) => {
-            println!("   Bucket '{}' created successfully", bucket_name);
-            Ok(())
-        }
-        Err(e) => Err(e.into()),
-    }
-}
-
-// Upload an object to a bucket
-async fn upload_object(
-    client: &Client,
-    bucket_name: &str,
-    object_key: &str,
-    file_path: &str,
-) -> Result<()> {
-    let body = ByteStream::from_path(Path::new(file_path))
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to read file: {}", e))?;
+        .context("CloudFrontキャッシュの無効化に失敗しました")?;
 
-    client
-        .put_object()
-        .bucket(bucket_name)
-        .key(object_key)
-        .body(body)
-        .send()
-        .await
-        .map_err(|e| anyhow::anyhow!("Error uploading file: {}", e))?;
-
-    println!(
-        "   File '{}' uploaded as '{}' to bucket '{}'",
-        file_path, object_key, bucket_name
-    );
-    Ok(())
-}
-
-// List objects in a bucket
-async fn list_objects(client: &Client, bucket_name: &str) -> Result<(), Error> {
-    let resp = client.list_objects_v2().bucket(bucket_name).send().await?;
-
-    if let Some(objects) = resp.contents() {
-        println!(
-            "   Found {} objects in bucket '{}':",
-            objects.len(),
-            bucket_name
-        );
-        for obj in objects {
-            println!(
-                "   - {} ({} bytes)",
-                obj.key().unwrap_or_default(),
-                obj.size()
-            );
-        }
-    } else {
-        println!("   No objects found in bucket '{}'", bucket_name);
-    }
-
-    Ok(())
-}
-
-// Download an object from a bucket
-async fn download_object(
-    client: &Client,
-    bucket_name: &str,
-    object_key: &str,
-    file_path: &str,
-) -> Result<()> {
-    let resp = client
-        .get_object()
-        .bucket(bucket_name)
-        .key(object_key)
-        .send()
-        .await
-        .map_err(|e| anyhow::anyhow!("Error getting object: {}", e))?;
-
-    let data = resp
-        .body
-        .collect()
-        .await
-        .map_err(|e| anyhow::anyhow!("Error collecting response data: {}", e))?;
-    let bytes = data.into_bytes();
-
-    std::fs::write(file_path, bytes).map_err(|e| anyhow::anyhow!("Error writing file: {}", e))?;
-
-    println!(
-        "   Object '{}' downloaded from bucket '{}' to '{}'",
-        object_key, bucket_name, file_path
-    );
-    Ok(())
-}
-
-// Delete an object from a bucket
-async fn delete_object(client: &Client, bucket_name: &str, object_key: &str) -> Result<()> {
-    client
-        .delete_object()
-        .bucket(bucket_name)
-        .key(object_key)
-        .send()
-        .await?;
-
-    println!(
-        "   Object '{}' deleted from bucket '{}'",
-        object_key, bucket_name
-    );
-    Ok(())
-}
-
-// Delete a bucket
-async fn delete_bucket(client: &Client, bucket_name: &str) -> Result<()> {
-    client.delete_bucket().bucket(bucket_name).send().await?;
-
-    println!("   Bucket '{}' deleted", bucket_name);
+    println!("キャッシュ無効化リクエストを送信しました: {:?}", resp);
     Ok(())
 }
