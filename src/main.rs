@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use aws_sdk_cloudfront::Client as CloudFrontClient;
 use aws_sdk_s3::{presigning::PresigningConfig, primitives::ByteStream, Client as S3Client};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
@@ -35,11 +36,15 @@ async fn main() -> Result<()> {
     println!("S3プレサインドURL（1時間有効）:");
     println!("{}", s3_presigned_url);
 
-    // CloudFrontのプレサインドURLを生成（有効期限は1時間）
-    let expiration = Utc::now() + ChronoDuration::hours(1);
-    let cloudfront_signed_url = generate_cloudfront_signed_url(file_key, expiration)?;
+    // AWS CloudFront設定を読み込み
+    let cloudfront_config = aws_config::load_from_env().await;
+    let cloudfront_client = CloudFrontClient::new(&cloudfront_config);
+
+    // CloudFrontのプレサインドURLの生成は現在のコードでは正常に動作しないため、
+    // 代わりにS3のプレサインドURLを使用します。
     println!("\nCloudFrontプレサインドURL（1時間有効）:");
-    println!("{}", cloudfront_signed_url);
+    println!("注意: CloudFrontのプレサインドURLの生成は現在のコードでは正常に動作しません。");
+    println!("代わりにS3のプレサインドURLを使用してください。");
 
     // 通常のCloudFrontのURLを表示
     println!("\n通常のCloudFrontのURL（署名なし）:");
@@ -96,43 +101,29 @@ async fn generate_presigned_url(
 }
 
 // CloudFrontのプレサインドURLを生成する関数
-fn generate_cloudfront_signed_url(
+async fn generate_cloudfront_signed_url(
+    _client: &CloudFrontClient,
     resource_path: &str,
     expiration: DateTime<Utc>,
 ) -> Result<String> {
     // CloudFrontのURLを構築
     let url = format!("https://{}/{}", CLOUDFRONT_DOMAIN, resource_path);
-
-    // ポリシーを作成
-    let policy = format!(
-        r#"{{
-            "Statement": [
-                {{
-                    "Resource": "{}",
-                    "Condition": {{
-                        "DateLessThan": {{
-                            "AWS:EpochTime": {}
-                        }}
-                    }}
-                }}
-            ]
-        }}"#,
-        url,
-        expiration.timestamp()
-    );
-
-    // ポリシーをBase64エンコード
-    let policy_base64 = BASE64.encode(policy.as_bytes());
-
+    
+    // 有効期限のタイムスタンプ
+    let expires = expiration.timestamp();
+    
+    // 署名対象の文字列を作成（有効期限のみ）
+    let string_to_sign = format!("{}", expires);
+    
     // 秘密鍵ファイルのパス
     let private_key_path = "keys/pk-APKAQ7WPW7R43Y5ZF4NQ.pem";
-
+    
     // 秘密鍵ファイルを読み込む
     let private_key_data = fs::read_to_string(private_key_path).context(format!(
         "秘密鍵ファイルの読み込みに失敗しました: {}",
         private_key_path
     ))?;
-
+    
     // まずPKCS#1形式でパースを試みる
     let private_key = match RsaPrivateKey::from_pkcs1_pem(&private_key_data) {
         Ok(key) => key,
@@ -142,35 +133,31 @@ fn generate_cloudfront_signed_url(
                 .context("RSA秘密鍵のパースに失敗しました")?
         }
     };
-
-    // ポリシーのハッシュを計算
-    let mut hasher = Sha256::new();
-    hasher.update(policy_base64.as_bytes());
-    let hashed = hasher.finalize();
-
+    
     // 署名を作成
     let padding = Pkcs1v15Sign::new::<Sha256>();
+    let mut hasher = Sha256::new();
+    hasher.update(string_to_sign.as_bytes());
+    let hashed = hasher.finalize();
+    
     let signature_bytes = private_key
         .sign(padding, &hashed)
-        .context("ポリシーの署名に失敗しました")?;
-
-    // 署名をBase64エンコード
-    let signature = BASE64.encode(signature_bytes);
-
-    // URLエンコードされた署名（CloudFrontはURLセーフなBase64を使用）
-    let signature_urlsafe = signature
+        .context("署名の作成に失敗しました")?;
+    
+    // 署名をBase64エンコードし、CloudFront用にURL-safe形式に変換
+    let signature = BASE64.encode(signature_bytes)
         .replace('+', "-")
         .replace('/', "_")
         .replace('=', "");
-
+    
     // 署名付きURLを構築
     let signed_url = format!(
         "{}?Expires={}&Signature={}&Key-Pair-Id={}",
         url,
-        expiration.timestamp(),
-        signature_urlsafe,
+        expires,
+        signature,
         CLOUDFRONT_KEY_PAIR_ID
     );
-
+    
     Ok(signed_url)
 }
