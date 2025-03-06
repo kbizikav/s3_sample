@@ -1,77 +1,66 @@
-# AWS S3 and CloudFront Sample in Rust
+# S3 and CloudFront URL Generator
 
-This project demonstrates how to interact with Amazon S3 and CloudFront using the AWS SDK for Rust. It provides examples of uploading files to S3 and generating presigned URLs for both S3 and CloudFront.
+This Rust application demonstrates how to:
+
+1. Upload files to Amazon S3
+2. Generate presigned URLs for downloading content from S3
+3. Generate presigned URLs for uploading content to S3
+4. Generate CloudFront signed URLs for downloading content
 
 ## Prerequisites
 
-1. [Rust](https://www.rust-lang.org/tools/install) installed on your system
-2. An AWS account with access credentials configured
-3. An S3 bucket for file uploads
-4. A CloudFront distribution connected to your S3 bucket
-5. A CloudFront key pair for signing URLs
-
-## Project Structure
-
-The project is organized into modules:
-
-- `main.rs`: Main application entry point
-- `config.rs`: Configuration handling
-- `s3.rs`: S3 operations (upload, presigned URLs)
-- `cloudfront.rs`: CloudFront operations (signed URLs)
+- Rust and Cargo installed
+- AWS credentials configured (either in `~/.aws/credentials` or as environment variables)
+- CloudFront key pair for generating signed URLs
 
 ## Configuration
 
-You can configure the application using environment variables or a `.env` file:
+The application uses the following environment variables:
 
 ```
-# AWS S3 Configuration
+# AWS Credentials
+AWS_REGION=your-region
+AWS_ACCESS_KEY_ID=your-access-key
+AWS_SECRET_ACCESS_KEY=your-secret-key
+
+# S3 Configuration
 BUCKET_NAME=your-bucket-name
 
-# AWS CloudFront Configuration
-CLOUDFRONT_DOMAIN=your-cloudfront-domain.cloudfront.net
+# CloudFront Configuration
+CLOUDFRONT_DOMAIN=your-cloudfront-domain
 CLOUDFRONT_KEY_PAIR_ID=your-key-pair-id
 PRIVATE_KEY_PATH=path/to/your/private-key.pem
-
-# AWS Credentials (optional, can also use ~/.aws/credentials)
-AWS_ACCESS_KEY_ID=your_access_key
-AWS_SECRET_ACCESS_KEY=your_secret_key
-AWS_REGION=your_region
 ```
 
-Copy `.env.example` to `.env` and update with your values.
+You can set these in a `.env` file in the project root.
 
-## Features
+## Running the Application
 
-This sample demonstrates:
-
-1. Uploading a file to S3
-2. Generating a presigned URL for S3 (temporary direct access)
-3. Generating a signed URL for CloudFront (temporary access through CDN)
-
-## Running the Sample
-
-Ensure you have a file named `example.txt` in the project root, then:
-
-```
-cargo build
+```bash
 cargo run
 ```
 
-The application will:
-1. Upload `example.txt` to your S3 bucket
-2. Generate and display a presigned URL for direct S3 access
-3. Generate and display a signed URL for CloudFront access
+This will:
+1. Upload the `example.txt` file to S3
+2. Generate and display an S3 presigned URL for downloading the file
+3. Generate and display an S3 presigned URL for uploading content
+4. Display the regular CloudFront URL for the file
+5. Generate and display a CloudFront signed URL for downloading the file
 
-## Error Handling
+## Uploading Content Using the Presigned URL
 
-The application uses the `anyhow` crate for comprehensive error handling, providing clear error messages for various failure scenarios.
+You can use the generated S3 presigned upload URL to upload content directly to S3. The `upload-example.sh` script demonstrates how to do this using curl:
 
-## CloudFront Signed URLs
+1. Run the application to generate a presigned upload URL
+2. Copy the URL and update the `PRESIGNED_URL` variable in `upload-example.sh`
+3. Run the script:
 
-The application demonstrates how to create signed URLs for CloudFront using the `cloudfront_sign` crate. This allows you to provide temporary access to private content distributed through CloudFront.
+```bash
+./upload-example.sh
+```
 
-## Notes
+## Notes on CloudFront for Uploading
 
-- All URLs generated are valid for 1 hour by default
-- The application automatically detects MIME types for uploaded files
-- Make sure your CloudFront distribution is properly configured to serve content from your S3 bucket
+CloudFront is primarily designed for content distribution, not for receiving uploads. For uploading content, it's recommended to use S3 presigned URLs directly (as shown above).
+
+If you need to upload through CloudFront, you would need to configure CloudFront with an S3 origin and set up appropriate behaviors and origin access controls to allow PUT/POST requests.
