@@ -1,25 +1,16 @@
 use anyhow::{Context, Result};
-use aws_sdk_s3::{
-    primitives::ByteStream,
-    Client as S3Client,
-    presigning::PresigningConfig,
-};
+use aws_sdk_s3::{presigning::PresigningConfig, primitives::ByteStream, Client as S3Client};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use std::time::Duration;
-use std::path::Path;
-use std::fs;
 use rsa::{
-    pkcs1::DecodeRsaPrivateKey,
-    RsaPrivateKey,
-    pkcs8::DecodePrivateKey,
-    pkcs1v15::Pkcs1v15Sign,
+    pkcs1::DecodeRsaPrivateKey, pkcs1v15::Pkcs1v15Sign, pkcs8::DecodePrivateKey, RsaPrivateKey,
 };
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
+use std::fs;
+use std::path::Path;
+use std::time::Duration;
 
-// S3バケット名を設定
 const BUCKET_NAME: &str = "my-rust-uploads";
-// CloudFrontのドメイン
 const CLOUDFRONT_DOMAIN: &str = "d29srixbc05tx1.cloudfront.net";
 const CLOUDFRONT_KEY_PAIR_ID: &str = "APKAQ7WPW7R43Y5ZF4NQ";
 
@@ -39,7 +30,8 @@ async fn main() -> Result<()> {
     upload_file_to_s3(&s3_client, file_path, file_key).await?;
 
     // S3のプレサインドURLを生成（有効期限は1時間）
-    let s3_presigned_url = generate_presigned_url(&s3_client, file_key, Duration::from_secs(3600)).await?;
+    let s3_presigned_url =
+        generate_presigned_url(&s3_client, file_key, Duration::from_secs(3600)).await?;
     println!("S3プレサインドURL（1時間有効）:");
     println!("{}", s3_presigned_url);
 
@@ -79,7 +71,11 @@ async fn upload_file_to_s3(client: &S3Client, file_path: &str, key: &str) -> Res
 }
 
 // S3オブジェクトのプレサインドURLを生成する関数
-async fn generate_presigned_url(client: &S3Client, key: &str, expiration: Duration) -> Result<String> {
+async fn generate_presigned_url(
+    client: &S3Client,
+    key: &str,
+    expiration: Duration,
+) -> Result<String> {
     // プレサイン設定を作成
     let presigning_config = PresigningConfig::builder()
         .expires_in(expiration)
@@ -100,10 +96,13 @@ async fn generate_presigned_url(client: &S3Client, key: &str, expiration: Durati
 }
 
 // CloudFrontのプレサインドURLを生成する関数
-fn generate_cloudfront_signed_url(resource_path: &str, expiration: DateTime<Utc>) -> Result<String> {
+fn generate_cloudfront_signed_url(
+    resource_path: &str,
+    expiration: DateTime<Utc>,
+) -> Result<String> {
     // CloudFrontのURLを構築
     let url = format!("https://{}/{}", CLOUDFRONT_DOMAIN, resource_path);
-    
+
     // ポリシーを作成
     let policy = format!(
         r#"{{
@@ -121,17 +120,19 @@ fn generate_cloudfront_signed_url(resource_path: &str, expiration: DateTime<Utc>
         url,
         expiration.timestamp()
     );
-    
+
     // ポリシーをBase64エンコード
     let policy_base64 = BASE64.encode(policy.as_bytes());
-    
+
     // 秘密鍵ファイルのパス
     let private_key_path = "keys/pk-APKAQ7WPW7R43Y5ZF4NQ.pem";
-    
+
     // 秘密鍵ファイルを読み込む
-    let private_key_data = fs::read_to_string(private_key_path)
-        .context(format!("秘密鍵ファイルの読み込みに失敗しました: {}", private_key_path))?;
-    
+    let private_key_data = fs::read_to_string(private_key_path).context(format!(
+        "秘密鍵ファイルの読み込みに失敗しました: {}",
+        private_key_path
+    ))?;
+
     // まずPKCS#1形式でパースを試みる
     let private_key = match RsaPrivateKey::from_pkcs1_pem(&private_key_data) {
         Ok(key) => key,
@@ -141,23 +142,27 @@ fn generate_cloudfront_signed_url(resource_path: &str, expiration: DateTime<Utc>
                 .context("RSA秘密鍵のパースに失敗しました")?
         }
     };
-    
+
     // ポリシーのハッシュを計算
     let mut hasher = Sha256::new();
     hasher.update(policy_base64.as_bytes());
     let hashed = hasher.finalize();
-    
+
     // 署名を作成
     let padding = Pkcs1v15Sign::new::<Sha256>();
-    let signature_bytes = private_key.sign(padding, &hashed)
+    let signature_bytes = private_key
+        .sign(padding, &hashed)
         .context("ポリシーの署名に失敗しました")?;
-    
+
     // 署名をBase64エンコード
     let signature = BASE64.encode(signature_bytes);
-    
+
     // URLエンコードされた署名（CloudFrontはURLセーフなBase64を使用）
-    let signature_urlsafe = signature.replace('+', "-").replace('/', "_").replace('=', "");
-    
+    let signature_urlsafe = signature
+        .replace('+', "-")
+        .replace('/', "_")
+        .replace('=', "");
+
     // 署名付きURLを構築
     let signed_url = format!(
         "{}?Expires={}&Signature={}&Key-Pair-Id={}",
@@ -166,6 +171,6 @@ fn generate_cloudfront_signed_url(resource_path: &str, expiration: DateTime<Utc>
         signature_urlsafe,
         CLOUDFRONT_KEY_PAIR_ID
     );
-    
+
     Ok(signed_url)
 }
