@@ -1,76 +1,77 @@
-# AWS S3 Sample in Rust
+# AWS S3 and CloudFront Sample in Rust
 
-This project demonstrates how to interact with Amazon S3 using the AWS SDK for Rust. It provides a comprehensive example of common S3 operations.
+This project demonstrates how to interact with Amazon S3 and CloudFront using the AWS SDK for Rust. It provides examples of uploading files to S3 and generating presigned URLs for both S3 and CloudFront.
 
 ## Prerequisites
 
 1. [Rust](https://www.rust-lang.org/tools/install) installed on your system
 2. An AWS account with access credentials configured
-3. AWS CLI configured or environment variables set for authentication
+3. An S3 bucket for file uploads
+4. A CloudFront distribution connected to your S3 bucket
+5. A CloudFront key pair for signing URLs
 
-## AWS Credentials Setup
+## Project Structure
 
-Before running this sample, ensure your AWS credentials are properly configured using one of these methods:
+The project is organized into modules:
 
-1. **AWS CLI configuration**:
-   ```
-   aws configure
-   ```
+- `main.rs`: Main application entry point
+- `config.rs`: Configuration handling
+- `s3.rs`: S3 operations (upload, presigned URLs)
+- `cloudfront.rs`: CloudFront operations (signed URLs)
 
-2. **Environment variables**:
-   ```
-   export AWS_ACCESS_KEY_ID=your_access_key
-   export AWS_SECRET_ACCESS_KEY=your_secret_key
-   export AWS_REGION=your_region
-   ```
+## Configuration
 
-3. **AWS credentials file**:
-   Create or edit `~/.aws/credentials` with:
-   ```
-   [default]
-   aws_access_key_id = your_access_key
-   aws_secret_access_key = your_secret_key
-   ```
+You can configure the application using environment variables or a `.env` file:
+
+```
+# AWS S3 Configuration
+BUCKET_NAME=your-bucket-name
+
+# AWS CloudFront Configuration
+CLOUDFRONT_DOMAIN=your-cloudfront-domain.cloudfront.net
+CLOUDFRONT_KEY_PAIR_ID=your-key-pair-id
+PRIVATE_KEY_PATH=path/to/your/private-key.pem
+
+# AWS Credentials (optional, can also use ~/.aws/credentials)
+AWS_ACCESS_KEY_ID=your_access_key
+AWS_SECRET_ACCESS_KEY=your_secret_key
+AWS_REGION=your_region
+```
+
+Copy `.env.example` to `.env` and update with your values.
 
 ## Features
 
-This sample demonstrates the following S3 operations:
+This sample demonstrates:
 
-1. Listing all buckets
-2. Creating a new bucket
-3. Uploading an object to a bucket
-4. Listing objects in a bucket
-5. Downloading an object from a bucket
-6. Deleting an object from a bucket
-7. Deleting a bucket
+1. Uploading a file to S3
+2. Generating a presigned URL for S3 (temporary direct access)
+3. Generating a signed URL for CloudFront (temporary access through CDN)
 
 ## Running the Sample
 
-Build and run the project with:
+Ensure you have a file named `example.txt` in the project root, then:
 
 ```
 cargo build
 cargo run
 ```
 
-## Code Structure
-
-- `main.rs`: Contains the main application logic and demonstrates all S3 operations
-- Each S3 operation is implemented as a separate async function:
-  - `list_buckets`: Lists all S3 buckets in your account
-  - `create_bucket`: Creates a new S3 bucket
-  - `upload_object`: Uploads a file to an S3 bucket
-  - `list_objects`: Lists objects in an S3 bucket
-  - `download_object`: Downloads an object from an S3 bucket
-  - `delete_object`: Deletes an object from an S3 bucket
-  - `delete_bucket`: Deletes an S3 bucket
+The application will:
+1. Upload `example.txt` to your S3 bucket
+2. Generate and display a presigned URL for direct S3 access
+3. Generate and display a signed URL for CloudFront access
 
 ## Error Handling
 
-The sample includes robust error handling using the `anyhow` crate for general errors and specific handling for AWS SDK errors.
+The application uses the `anyhow` crate for comprehensive error handling, providing clear error messages for various failure scenarios.
+
+## CloudFront Signed URLs
+
+The application demonstrates how to create signed URLs for CloudFront using the `cloudfront_sign` crate. This allows you to provide temporary access to private content distributed through CloudFront.
 
 ## Notes
 
-- The sample creates temporary files for demonstration purposes and cleans them up afterward
-- The bucket name used is "my-test-bucket-rust-sample" - you may want to change this to a unique name
-- The sample is designed to run end-to-end, creating and then cleaning up all resources
+- All URLs generated are valid for 1 hour by default
+- The application automatically detects MIME types for uploaded files
+- Make sure your CloudFront distribution is properly configured to serve content from your S3 bucket
