@@ -8,6 +8,14 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use std::time::Duration;
 use std::path::Path;
+use std::fs;
+use rsa::{
+    pkcs1::DecodeRsaPrivateKey,
+    RsaPrivateKey,
+    pkcs8::DecodePrivateKey,
+    pkcs1v15::Pkcs1v15Sign,
+};
+use sha2::{Sha256, Digest};
 
 // S3バケット名を設定
 const BUCKET_NAME: &str = "my-rust-uploads";
@@ -115,21 +123,47 @@ fn generate_cloudfront_signed_url(resource_path: &str, expiration: DateTime<Utc>
     );
     
     // ポリシーをBase64エンコード
-    let _policy_base64 = BASE64.encode(policy.as_bytes());
+    let policy_base64 = BASE64.encode(policy.as_bytes());
+    
+    // 秘密鍵ファイルのパス
+    let private_key_path = "keys/pk-APKAQ7WPW7R43Y5ZF4NQ.pem";
+    
+    // 秘密鍵ファイルを読み込む
+    let private_key_data = fs::read_to_string(private_key_path)
+        .context(format!("秘密鍵ファイルの読み込みに失敗しました: {}", private_key_path))?;
+    
+    // まずPKCS#1形式でパースを試みる
+    let private_key = match RsaPrivateKey::from_pkcs1_pem(&private_key_data) {
+        Ok(key) => key,
+        Err(_) => {
+            // PKCS#1形式でパースできない場合はPKCS#8形式でパースを試みる
+            RsaPrivateKey::from_pkcs8_pem(&private_key_data)
+                .context("RSA秘密鍵のパースに失敗しました")?
+        }
+    };
+    
+    // ポリシーのハッシュを計算
+    let mut hasher = Sha256::new();
+    hasher.update(policy_base64.as_bytes());
+    let hashed = hasher.finalize();
     
     // 署名を作成
-    // 注意: 実際のアプリケーションでは、RSA秘密鍵を使用して署名を生成する必要があります
-    // ここでは簡略化のためにダミーの署名を返します
+    let padding = Pkcs1v15Sign::new::<Sha256>();
+    let signature_bytes = private_key.sign(padding, &hashed)
+        .context("ポリシーの署名に失敗しました")?;
     
-    // ダミーの署名（実際のアプリケーションでは正しい署名を生成する必要があります）
-    let signature = "DUMMY_SIGNATURE_REPLACE_WITH_ACTUAL_IMPLEMENTATION";
+    // 署名をBase64エンコード
+    let signature = BASE64.encode(signature_bytes);
+    
+    // URLエンコードされた署名（CloudFrontはURLセーフなBase64を使用）
+    let signature_urlsafe = signature.replace('+', "-").replace('/', "_").replace('=', "");
     
     // 署名付きURLを構築
     let signed_url = format!(
         "{}?Expires={}&Signature={}&Key-Pair-Id={}",
         url,
         expiration.timestamp(),
-        signature,
+        signature_urlsafe,
         CLOUDFRONT_KEY_PAIR_ID
     );
     

@@ -1478,6 +1478,7 @@ dependencies = [
  "pkcs1",
  "pkcs8",
  "rand_core",
+ "sha2",
  "signature",
  "spki",
  "subtle",
@@ -1559,6 +1560,7 @@ dependencies = [
  "mime_guess",
  "rsa",
  "sha1",
+ "sha2",
  "tokio",
  "url",
 ]
