@@ -2,7 +2,6 @@ mod s3;
 
 use anyhow::Result;
 use aws_sdk_s3::Client as S3Client;
-use chrono::{Duration as ChronoDuration, Utc};
 use s3::{check_object_exists, S3Config};
 use std::time::Duration;
 
@@ -21,7 +20,7 @@ async fn main() -> Result<()> {
         &config,
         &upload_key,
         content_type,
-        Duration::from_secs(3600),
+        Duration::from_secs(10), // valid for 10sec
     )
     .await?;
 
@@ -41,11 +40,9 @@ async fn main() -> Result<()> {
     let result = check_object_exists(&s3_client, &config, &upload_key).await?;
     println!("Object exists: {}", result);
 
-    // Generate CloudFront signed URL for downloading (valid for 1 hour)
-    let expiration = Utc::now() + ChronoDuration::hours(1);
-    let cloudfront_signed_url = s3::generate_signed_url(&config, &upload_key, expiration)?;
-    println!("\nCloudFront Signed URL for downloading (valid for 1 hour):");
-    println!("{}", cloudfront_signed_url);
+    let cloudfront_signed_url =
+        s3::generate_signed_url(&config, &upload_key, Duration::from_secs(10))?;
+    println!("cloud front url: {}", cloudfront_signed_url);
 
     Ok(())
 }

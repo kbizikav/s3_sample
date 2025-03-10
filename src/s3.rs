@@ -3,7 +3,6 @@ use aws_sdk_s3::{error::SdkError, presigning::PresigningConfig, Client as S3Clie
 use serde::Deserialize;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
 use cloudfront_sign;
 use std::fs;
 
@@ -62,7 +61,7 @@ pub async fn check_object_exists(client: &S3Client, config: &S3Config, key: &str
 pub fn generate_signed_url(
     config: &S3Config,
     resource_path: &str,
-    expiration: DateTime<Utc>,
+    expiration: Duration,
 ) -> Result<String> {
     let url = format!("https://{}/{}", config.cloudfront_domain, resource_path);
 
@@ -75,7 +74,7 @@ pub fn generate_signed_url(
     let mut options = cloudfront_sign::SignedOptions::default();
     options.key_pair_id = config.cloudfront_key_pair_id.clone();
     options.private_key = private_key_data;
-    options.date_less_than = expiration.timestamp() as u64;
+    options.date_less_than = chrono::Utc::now().timestamp() as u64 + expiration.as_secs();
 
     let signed_url = cloudfront_sign::get_signed_url(&url, &options)
         .map_err(|e| anyhow::anyhow!("Failed to generate CloudFront signed URL: {:?}", e))?;
