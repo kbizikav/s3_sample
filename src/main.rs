@@ -1,22 +1,21 @@
-mod config;
 mod s3;
 
 use anyhow::Result;
 use aws_sdk_s3::Client as S3Client;
 use chrono::{Duration as ChronoDuration, Utc};
+use s3::S3Config;
 use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
-    let config = envy::from_env::<config::EnvVar>()?;
+    let config = envy::from_env::<S3Config>()?;
     let aws_config = aws_config::load_from_env().await;
     let s3_client = S3Client::new(&aws_config);
 
-    // Generate S3 presigned URL for uploading (valid for 1 hour)
-    let content_type = "application/octet-stream"; // Example content type
-    let upload_key = "uploaded-content2.txt"; // Example key for the uploaded content
+    let content_type = "application/octet-stream";
+    let upload_key = "uploaded-content2.txt";
     let s3_presigned_upload_url = s3::generate_presigned_upload_url(
         &s3_client,
         &config,

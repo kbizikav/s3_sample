@@ -1,15 +1,22 @@
 use anyhow::{Context, Result};
 use aws_sdk_s3::{presigning::PresigningConfig, Client as S3Client};
+use serde::Deserialize;
 use std::time::Duration;
-
-use crate::config::EnvVar;
 
 use chrono::{DateTime, Utc};
 use cloudfront_sign;
 use std::fs;
 
+#[derive(Debug, Deserialize)]
+pub struct S3Config {
+    pub bucket_name: String,
+    pub cloudfront_domain: String,
+    pub cloudfront_key_pair_id: String,
+    pub private_key_path: String,
+}
+
 pub fn generate_signed_url(
-    config: &EnvVar,
+    config: &S3Config,
     resource_path: &str,
     expiration: DateTime<Utc>,
 ) -> Result<String> {
@@ -37,7 +44,7 @@ pub fn generate_signed_url(
 
 pub async fn generate_presigned_upload_url(
     client: &S3Client,
-    config: &EnvVar,
+    config: &S3Config,
     key: &str,
     content_type: &str,
     expiration: Duration,
