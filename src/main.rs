@@ -1,7 +1,7 @@
 mod s3;
 
-use aws_sdk_s3::Client as S3Client;
-use s3::{check_object_exists, S3Config};
+use aws_sdk_s3::Client as AwsS3Client;
+use s3::{S3Client, S3Config};
 use std::time::Duration;
 
 #[tokio::main]
@@ -10,21 +10,20 @@ async fn main() -> anyhow::Result<()> {
 
     let config = envy::from_env::<S3Config>()?;
     let aws_config = aws_config::load_from_env().await;
-    let s3_client = S3Client::new(&aws_config);
+    let s3_client = S3Client::new(AwsS3Client::new(&aws_config), config);
 
     let content_type = "application/text";
     let upload_key = format!("uploaded-content-{}.txt", uuid::Uuid::new_v4());
-    let s3_presigned_upload_url = s3::generate_presigned_upload_url(
-        &s3_client,
-        &config,
-        &upload_key,
-        content_type,
-        Duration::from_secs(10), // valid for 10sec
-    )
-    .await?;
+    let s3_presigned_upload_url = s3_client
+        .generate_presigned_upload_url(
+            &upload_key,
+            content_type,
+            Duration::from_secs(10), // valid for 10sec
+        )
+        .await?;
 
     // check if the object exists
-    let result = check_object_exists(&s3_client, &config, &upload_key).await?;
+    let result = s3_client.check_object_exists(&upload_key).await?;
     println!("Object exists: {}", result);
 
     // put content to the presigned URL
@@ -36,11 +35,11 @@ async fn main() -> anyhow::Result<()> {
         .send()
         .await?;
 
-    let result = check_object_exists(&s3_client, &config, &upload_key).await?;
+    let result = s3_client.check_object_exists(&upload_key).await?;
     println!("Object exists: {}", result);
 
     let cloudfront_signed_url =
-        s3::generate_signed_url(&config, &upload_key, Duration::from_secs(10))?;
+        s3_client.generate_signed_url(&upload_key, Duration::from_secs(10))?;
     println!("cloud front url: {}", cloudfront_signed_url);
 
     Ok(())
