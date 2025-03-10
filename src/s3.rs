@@ -1,105 +1,40 @@
 use anyhow::{Context, Result};
-use aws_sdk_s3::{
-    presigning::PresigningConfig, primitives::ByteStream, Client as S3Client,
-};
-use std::path::Path;
+use aws_sdk_s3::{presigning::PresigningConfig, Client as S3Client};
 use std::time::Duration;
 
 use crate::config::Config;
 
-/// Uploads a file to S3 bucket
-///
-/// # Arguments
-///
-/// * `client` - The S3 client
-/// * `config` - Application configuration
-/// * `file_path` - Path to the file to upload
-/// * `key` - Key (name) to use for the file in S3
-///
-/// # Returns
-///
-/// * `Result<()>` - Success or error
-pub async fn upload_file(
-    client: &S3Client,
+use chrono::{DateTime, Utc};
+use cloudfront_sign;
+use std::fs;
+
+pub fn generate_signed_url(
     config: &Config,
-    file_path: &str,
-    key: &str,
-) -> Result<()> {
-    // Read the file
-    let body = ByteStream::from_path(Path::new(file_path))
-        .await
-        .context(format!("Failed to read file: {}", file_path))?;
-
-    // Determine content type based on file extension
-    let content_type = mime_guess::from_path(file_path)
-        .first_or_octet_stream()
-        .to_string();
-
-    // Upload to S3
-    let resp = client
-        .put_object()
-        .bucket(&config.bucket_name)
-        .key(key)
-        .body(body)
-        .content_type(content_type)
-        .send()
-        .await
-        .context("Failed to upload file to S3")?;
-
-    println!("Successfully uploaded file: {:?}", resp);
-    Ok(())
-}
-
-/// Generates a presigned URL for an S3 object
-///
-/// # Arguments
-///
-/// * `client` - The S3 client
-/// * `config` - Application configuration
-/// * `key` - Key (name) of the file in S3
-/// * `expiration` - How long the URL should be valid
-///
-/// # Returns
-///
-/// * `Result<String>` - The presigned URL or error
-pub async fn generate_presigned_url(
-    client: &S3Client,
-    config: &Config,
-    key: &str,
-    expiration: Duration,
+    resource_path: &str,
+    expiration: DateTime<Utc>,
 ) -> Result<String> {
-    // Create presigning configuration
-    let presigning_config = PresigningConfig::builder()
-        .expires_in(expiration)
-        .build()
-        .context("Failed to create presigning configuration")?;
+    // Build the CloudFront URL
+    let url = format!("https://{}/{}", config.cloudfront_domain, resource_path);
 
-    // Create and presign GetObject request
-    let presigned_request = client
-        .get_object()
-        .bucket(&config.bucket_name)
-        .key(key)
-        .presigned(presigning_config)
-        .await
-        .context("Failed to generate presigned URL")?;
+    // Read the private key file
+    let private_key_data = fs::read_to_string(&config.private_key_path).context(format!(
+        "Failed to read private key file: {}",
+        config.private_key_path
+    ))?;
 
-    // Return URL as string
-    Ok(presigned_request.uri().to_string())
+    // Create SignedOptions
+    let mut options = cloudfront_sign::SignedOptions::default();
+    options.key_pair_id = config.cloudfront_key_pair_id.clone();
+    options.private_key = private_key_data;
+    options.date_less_than = expiration.timestamp() as u64;
+
+    // Generate signed URL
+    let signed_url = cloudfront_sign::get_signed_url(&url, &options)
+        .map_err(|e| anyhow::anyhow!("Failed to generate CloudFront signed URL: {:?}", e))?;
+
+    Ok(signed_url)
 }
 
-/// Generates a presigned URL for uploading content to S3
-///
-/// # Arguments
-///
-/// * `client` - The S3 client
-/// * `config` - Application configuration
-/// * `key` - Key (name) to use for the file in S3
-/// * `content_type` - MIME type of the content to be uploaded
-/// * `expiration` - How long the URL should be valid
-///
-/// # Returns
-///
-/// * `Result<String>` - The presigned URL for uploading or error
 pub async fn generate_presigned_upload_url(
     client: &S3Client,
     config: &Config,
