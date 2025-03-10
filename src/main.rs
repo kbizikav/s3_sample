@@ -1,12 +1,11 @@
 mod s3;
 
-use anyhow::Result;
 use aws_sdk_s3::Client as S3Client;
 use s3::{check_object_exists, S3Config};
 use std::time::Duration;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> anyhow::Result<()> {
     dotenv::dotenv().ok();
 
     let config = envy::from_env::<S3Config>()?;
