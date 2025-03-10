@@ -1,12 +1,9 @@
 use aws_sdk_s3::{error::SdkError, presigning::PresigningConfig, Client as S3Client};
 use serde::Deserialize;
+use std::fs;
 use std::io;
 use std::time::Duration;
 
-use cloudfront_sign;
-use std::fs;
-
-// Define a custom Result type that uses our S3Error
 pub type Result<T> = std::result::Result<T, S3Error>;
 
 #[derive(Debug, Deserialize)]
@@ -20,19 +17,19 @@ pub struct S3Config {
 #[derive(Debug, thiserror::Error)]
 pub enum S3Error {
     #[error("Failed to create presigning configuration: {0}")]
-    PresigningConfigError(String),
+    PresigningConfig(String),
 
     #[error("Failed to generate presigned upload URL: {0}")]
-    PresignedUrlGenerationError(String),
+    PresignedUrlGeneration(String),
 
     #[error("Failed to check if object exists: {0}")]
-    ObjectExistenceCheckError(String),
+    ObjectExistenceCheck(String),
 
     #[error("Failed to read private key file: {0}")]
     IoError(#[from] io::Error),
 
     #[error("Failed to generate CloudFront signed URL: {0}")]
-    CloudFrontSigningError(String),
+    CloudFrontSigning(String),
 }
 
 pub async fn generate_presigned_upload_url(
@@ -45,7 +42,7 @@ pub async fn generate_presigned_upload_url(
     let presigning_config = PresigningConfig::builder()
         .expires_in(expiration)
         .build()
-        .map_err(|e| S3Error::PresigningConfigError(e.to_string()))?;
+        .map_err(|e| S3Error::PresigningConfig(e.to_string()))?;
 
     let presigned_request = client
         .put_object()
@@ -54,7 +51,7 @@ pub async fn generate_presigned_upload_url(
         .content_type(content_type)
         .presigned(presigning_config)
         .await
-        .map_err(|e| S3Error::PresignedUrlGenerationError(e.to_string()))?;
+        .map_err(|e| S3Error::PresignedUrlGeneration(e.to_string()))?;
 
     Ok(presigned_request.uri().to_string())
 }
@@ -74,7 +71,7 @@ pub async fn check_object_exists(client: &S3Client, config: &S3Config, key: &str
                     return Ok(false);
                 }
             }
-            Err(S3Error::ObjectExistenceCheckError(format!("{:?}", err)))
+            Err(S3Error::ObjectExistenceCheck(format!("{:?}", err)))
         }
     }
 }
@@ -89,13 +86,15 @@ pub fn generate_signed_url(
     // Read the private key file
     let private_key_data = fs::read_to_string(&config.private_key_path)?;
 
-    let mut options = cloudfront_sign::SignedOptions::default();
-    options.key_pair_id = config.cloudfront_key_pair_id.clone();
-    options.private_key = private_key_data;
-    options.date_less_than = chrono::Utc::now().timestamp() as u64 + expiration.as_secs();
+    let options = cloudfront_sign::SignedOptions {
+        key_pair_id: config.cloudfront_key_pair_id.clone(),
+        private_key: private_key_data,
+        date_less_than: chrono::Utc::now().timestamp() as u64 + expiration.as_secs(),
+        ..Default::default()
+    };
 
     let signed_url = cloudfront_sign::get_signed_url(&url, &options)
-        .map_err(|e| S3Error::CloudFrontSigningError(format!("{:?}", e)))?;
+        .map_err(|e| S3Error::CloudFrontSigning(format!("{:?}", e)))?;
 
     Ok(signed_url)
 }
