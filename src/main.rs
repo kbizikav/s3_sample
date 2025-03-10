@@ -10,7 +10,7 @@ async fn main() -> anyhow::Result<()> {
     let aws_config = aws_config::load_from_env().await;
     let s3_client = S3Client::new(aws_config, config);
 
-    let content_type = "application/text";
+    let content_type = "application/octet-stream";
     let upload_key = format!("uploaded-content-{}.txt", uuid::Uuid::new_v4());
     let s3_presigned_upload_url = s3_client
         .generate_presigned_upload_url(
