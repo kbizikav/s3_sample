@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use aws_sdk_s3::{presigning::PresigningConfig, Client as S3Client};
+use aws_sdk_s3::{error::SdkError, presigning::PresigningConfig, Client as S3Client};
 use serde::Deserialize;
 use std::time::Duration;
 
@@ -39,6 +39,25 @@ pub async fn generate_presigned_upload_url(
     Ok(presigned_request.uri().to_string())
 }
 
+pub async fn check_object_exists(client: &S3Client, config: &S3Config, key: &str) -> Result<bool> {
+    match client
+        .head_object()
+        .bucket(&config.bucket_name)
+        .key(key)
+        .send()
+        .await
+    {
+        Ok(_) => Ok(true),
+        Err(err) => {
+            if let SdkError::ServiceError(service_err) = &err {
+                if service_err.err().is_not_found() {
+                    return Ok(false);
+                }
+            }
+            Err(err).context("Failed to check if object exists")
+        }
+    }
+}
 
 pub fn generate_signed_url(
     config: &S3Config,
