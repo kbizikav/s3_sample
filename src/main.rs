@@ -1,6 +1,4 @@
 mod s3;
-
-use aws_sdk_s3::Client as AwsS3Client;
 use s3::{S3Client, S3Config};
 use std::time::Duration;
 
@@ -10,7 +8,7 @@ async fn main() -> anyhow::Result<()> {
 
     let config = envy::from_env::<S3Config>()?;
     let aws_config = aws_config::load_from_env().await;
-    let s3_client = S3Client::new(AwsS3Client::new(&aws_config), config);
+    let s3_client = S3Client::new(aws_config, config);
 
     let content_type = "application/text";
     let upload_key = format!("uploaded-content-{}.txt", uuid::Uuid::new_v4());
@@ -41,6 +39,10 @@ async fn main() -> anyhow::Result<()> {
     let cloudfront_signed_url =
         s3_client.generate_signed_url(&upload_key, Duration::from_secs(10))?;
     println!("cloud front url: {}", cloudfront_signed_url);
+
+    // download the object
+    let downloaded_content = reqwest::get(&cloudfront_signed_url).await?.text().await?;
+    println!("Downloaded content: {}", downloaded_content);
 
     Ok(())
 }

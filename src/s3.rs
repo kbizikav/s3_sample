@@ -1,3 +1,4 @@
+use aws_config::SdkConfig;
 use aws_sdk_s3::{error::SdkError, presigning::PresigningConfig, Client as AwsS3Client};
 use serde::Deserialize;
 use std::fs;
@@ -20,7 +21,8 @@ pub struct S3Client {
 }
 
 impl S3Client {
-    pub fn new(client: AwsS3Client, config: S3Config) -> Self {
+    pub fn new(aws_config: SdkConfig, config: S3Config) -> Self {
+        let client = AwsS3Client::new(&aws_config);
         Self { client, config }
     }
 }
