@@ -13,7 +13,7 @@ async fn main() -> anyhow::Result<()> {
     let content_type = "application/octet-stream";
     let upload_key = format!("uploaded-content-{}.txt", uuid::Uuid::new_v4());
     let s3_presigned_upload_url = s3_client
-        .generate_presigned_upload_url(
+        .generate_upload_url(
             &upload_key,
             content_type,
             Duration::from_secs(10), // valid for 10sec
@@ -37,12 +37,21 @@ async fn main() -> anyhow::Result<()> {
     println!("Object exists: {}", result);
 
     let cloudfront_signed_url =
-        s3_client.generate_signed_url(&upload_key, Duration::from_secs(10))?;
+        s3_client.generate_download_url(&upload_key, Duration::from_secs(10))?;
     println!("cloud front url: {}", cloudfront_signed_url);
 
     // download the object
     let downloaded_content = reqwest::get(&cloudfront_signed_url).await?.text().await?;
     println!("Downloaded content: {}", downloaded_content);
+
+    // delete the object
+    s3_client.delete_object(&upload_key).await?;
+
+    println!("Object deleted");
+
+    // check if the object exists
+    let result = s3_client.check_object_exists(&upload_key).await?;
+    println!("Object exists: {}", result);
 
     Ok(())
 }
